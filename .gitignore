@@ -1,0 +1,15 @@
+# Build outputs
+product/
+release/
+
+# Tile generator artifacts
+tile-history.yml
+
+# Large binary files (downloaded by build script)
+resources/*.tgz
+
+# Claude Code session data
+.claude/
+
+# OS files
+.DS_Store

@@ -1,0 +1,508 @@
+---
+name: seaweedfs
+icon_file: resources/icon.png
+label: SeaweedFS Object Storage
+metadata_version: 3.0
+version: "1.0.78"
+description: |
+  SeaweedFS is a distributed storage system for blobs, objects, files, and data lake.
+  This tile provides S3-compatible object storage with both shared and dedicated cluster options.
+
+# Enable service broker - required for $self accessors (UAA client for BOSH access)
+service_broker: true
+
+# Require TAS/Elastic Runtime for gorouter integration, NATS, and CF APIs
+requires_product_versions:
+  - name: cf
+    version: "~> 4.0"
+
+stemcell_criteria:
+  os: ubuntu-jammy
+  version: '1.0'
+
+# Service plan forms for operator-configurable on-demand plans
+service_plan_forms:
+  - name: on_demand_service_plans
+    label: On-Demand Service Plans
+    description: |
+      Configure on-demand SeaweedFS cluster plans that provision dedicated instances.
+      Each plan creates isolated SeaweedFS clusters for applications.
+    optional: true
+    properties:
+      - name: plan_description
+        type: string
+        label: Plan Description
+        description: Description shown to developers in the marketplace
+        configurable: true
+        default: "On-demand SeaweedFS cluster"
+      - name: deployment_type
+        type: dropdown_select
+        label: Deployment Type
+        description: |
+          Single Node: Lightweight deployment with 1 master, 1 volume server, and 1 filer.
+          Ideal for development, testing, and non-critical workloads. No data replication.
+
+          High Availability: Production-ready deployment with 3 masters, 6 volume servers,
+          and 3 filers across availability zones. Includes rack-aware replication for
+          fault tolerance and automatic failover.
+        default: single_node
+        configurable: true
+        options:
+          - name: single_node
+            label: "Single Node - Dev/Test (1 master, 1 volume, 1 filer)"
+          - name: ha
+            label: "High Availability - Production (3 masters, 6 volumes, 3 filers)"
+      - name: vm_type
+        type: vm_type_dropdown
+        label: VM Type
+        description: VM type for cluster nodes. Larger VMs provide more CPU and memory for better performance.
+        configurable: true
+      - name: disk_type
+        type: disk_type_dropdown
+        label: Persistent Disk Type
+        description: Persistent disk type for data storage. Choose based on capacity and performance requirements.
+        configurable: true
+      - name: storage_quota_gb
+        type: integer
+        label: Storage Quota (GB)
+        description: Maximum storage quota per service instance (enforced at bucket level)
+        default: 100
+        configurable: true
+        constraints:
+          min: 10
+          max: 10000
+
+packages:
+  - name: seaweedfs
+    type: bosh-release
+    path: resources/seaweedfs-release.tgz
+    jobs:
+      # Shared cluster components
+      - name: seaweedfs-master
+        templates:
+          - name: seaweedfs-master
+            release: seaweedfs
+          - name: route_registrar
+            release: routing
+            consumes:
+              nats-tls:
+                from: nats-tls
+                deployment: (( ..cf.deployment_name ))
+          - name: bpm
+            release: bpm
+        memory: 1024
+        ephemeral_disk: 4096
+        persistent_disk: 10240
+        instances: 1
+        cpu: 1
+        static_ip: 0
+        dynamic_ip: 1
+        max_in_flight: 1
+        properties:
+          nats:
+            tls:
+              enabled: true
+              client_cert: (( ..cf.properties.nats_client_cert.cert_pem ))
+              client_key: (( ..cf.properties.nats_client_cert.private_key_pem ))
+              ca_cert: (( ..cf.properties.nats_tls_external_cert.cert_pem ))
+          route_registrar:
+            routes:
+              - name: seaweedfs-master
+                port: 9333
+                registration_interval: 20s
+                uris:
+                  - (( .properties.master_console_route_name.value )).(( ..cf.cloud_controller.system_domain.value ))
+          seaweedfs:
+            master:
+              port: 9333
+              default_replication: (( .properties.shared_replication.value ))
+
+      - name: seaweedfs-volume
+        templates:
+          - name: seaweedfs-volume
+            release: seaweedfs
+          - name: bpm
+            release: bpm
+        memory: 2048
+        ephemeral_disk: 4096
+        persistent_disk: 102400
+        instances: 3
+        cpu: 2
+        static_ip: 0
+        dynamic_ip: 1
+        max_in_flight: 1
+        properties:
+          seaweedfs:
+            volume:
+              max_volumes: (( .properties.shared_max_volumes.value ))
+
+      - name: seaweedfs-filer
+        templates:
+          - name: seaweedfs-filer
+            release: seaweedfs
+          - name: route_registrar
+            release: routing
+            consumes:
+              nats-tls:
+                from: nats-tls
+                deployment: (( ..cf.deployment_name ))
+          - name: bpm
+            release: bpm
+        memory: 2048
+        ephemeral_disk: 4096
+        persistent_disk: 10240
+        instances: 1
+        cpu: 2
+        static_ip: 0
+        dynamic_ip: 1
+        max_in_flight: 1
+        properties:
+          nats:
+            tls:
+              enabled: true
+              client_cert: (( ..cf.properties.nats_client_cert.cert_pem ))
+              client_key: (( ..cf.properties.nats_client_cert.private_key_pem ))
+              ca_cert: (( ..cf.properties.nats_tls_external_cert.cert_pem ))
+          route_registrar:
+            routes:
+              - name: seaweedfs-filer
+                port: 8888
+                registration_interval: 20s
+                uris:
+                  - (( .properties.filer_console_route_name.value )).(( ..cf.cloud_controller.system_domain.value ))
+          seaweedfs:
+            filer: {}
+
+      # S3 Gateway for external access (via gorouter for TLS termination)
+      - name: seaweedfs-s3
+        templates:
+          - name: seaweedfs-s3
+            release: seaweedfs
+          - name: route_registrar
+            release: routing
+            consumes:
+              nats-tls:
+                from: nats-tls
+                deployment: (( ..cf.deployment_name ))
+          - name: bpm
+            release: bpm
+        memory: 1024
+        ephemeral_disk: 4096
+        persistent_disk: 1024
+        instances: 1
+        cpu: 1
+        static_ip: 0
+        dynamic_ip: 1
+        max_in_flight: 1
+        properties:
+          nats:
+            tls:
+              enabled: true
+              client_cert: (( ..cf.properties.nats_client_cert.cert_pem ))
+              client_key: (( ..cf.properties.nats_client_cert.private_key_pem ))
+              ca_cert: (( ..cf.properties.nats_tls_external_cert.cert_pem ))
+          route_registrar:
+            routes:
+              - name: seaweedfs-s3
+                port: 8333
+                registration_interval: 20s
+                uris:
+                  - (( .properties.s3_route_name.value )).(( ..cf.cloud_controller.system_domain.value ))
+          seaweedfs:
+            s3:
+              port: 8333
+              config:
+                enabled: true
+                identities:
+                  - name: admin
+                    credentials:
+                      - accessKey: (( .properties.generated_s3_credentials.identity ))
+                        secretKey: (( .properties.generated_s3_credentials.password ))
+                    actions:
+                      - "Admin"
+                      - "Read"
+                      - "Write"
+
+      # Service Broker
+      - name: seaweedfs-broker
+        templates:
+          - name: seaweedfs-broker
+            release: seaweedfs
+          - name: route_registrar
+            release: routing
+            consumes:
+              nats-tls:
+                from: nats-tls
+                deployment: (( ..cf.deployment_name ))
+          - name: bpm
+            release: bpm
+        memory: 1024
+        ephemeral_disk: 4096
+        persistent_disk: 2048
+        instances: 1
+        cpu: 1
+        static_ip: 0
+        dynamic_ip: 1
+        max_in_flight: 1
+        properties:
+          nats:
+            tls:
+              enabled: true
+              client_cert: (( ..cf.properties.nats_client_cert.cert_pem ))
+              client_key: (( ..cf.properties.nats_client_cert.private_key_pem ))
+              ca_cert: (( ..cf.properties.nats_tls_external_cert.cert_pem ))
+          route_registrar:
+            routes:
+              - name: seaweedfs-broker
+                port: 8080
+                registration_interval: 20s
+                uris:
+                  - (( .properties.broker_route_name.value )).(( ..cf.cloud_controller.system_domain.value ))
+          seaweedfs:
+            broker:
+              port: 8080
+              auth:
+                username: (( .properties.generated_broker_credentials.identity ))
+                password: (( .properties.generated_broker_credentials.password ))
+              catalog:
+                icon_base64: (( .properties.tile_icon_base64.value ))
+              shared_cluster:
+                enabled: (( .properties.shared_cluster_enabled.value ))
+                # S3 endpoint uses gorouter route (TLS handled by gorouter)
+                s3_endpoint: (( .properties.s3_route_name.value )).(( ..cf.cloud_controller.system_domain.value ))
+                use_ssl: true
+                access_key: (( .properties.generated_s3_credentials.identity ))
+                secret_key: (( .properties.generated_s3_credentials.password ))
+              # BOSH Director configuration for on-demand deployments
+              bosh:
+                url: https://(( $director.hostname )):25555
+                root_ca_cert: (( $director.ca_public_key ))
+                authentication:
+                  uaa:
+                    url: https://(( $director.hostname )):8443
+                    client_id: (( $self.uaa_client_name ))
+                    client_secret: (( $self.uaa_client_secret ))
+              on_demand:
+                service_name: seaweedfs
+                plans: (( .properties.on_demand_service_plans.value ))
+                stemcell_os: ubuntu-jammy
+                stemcell_version: "1.719"
+                network: (( $self.service_network ))
+              cf:
+                system_domain: (( ..cf.cloud_controller.system_domain.value ))
+                apps_domain: (( ..cf.cloud_controller.apps_domain.value ))
+
+      # Register broker errand (post-deploy)
+      - name: register-broker
+        templates:
+          - name: register-broker
+            release: seaweedfs
+        lifecycle: errand
+        post_deploy: true
+        memory: 512
+        ephemeral_disk: 2048
+        instances: 1
+        cpu: 1
+        static_ip: 0
+        dynamic_ip: 1
+        properties:
+          cf:
+            api_url: https://api.(( ..cf.cloud_controller.system_domain.value ))
+            admin_username: (( ..cf.uaa.system_services_credentials.identity ))
+            admin_password: (( ..cf.uaa.system_services_credentials.password ))
+            skip_ssl_validation: true
+          broker:
+            name: seaweedfs
+            # Use routed URL via gorouter for stable, externally-accessible broker endpoint
+            url: https://(( .properties.broker_route_name.value )).(( ..cf.cloud_controller.system_domain.value ))
+            username: (( .properties.generated_broker_credentials.identity ))
+            password: (( .properties.generated_broker_credentials.password ))
+            enable_service_access: true
+
+      # Deregister broker errand (pre-delete)
+      - name: deregister-broker
+        templates:
+          - name: deregister-broker
+            release: seaweedfs
+        lifecycle: errand
+        pre_delete: true
+        memory: 512
+        ephemeral_disk: 2048
+        instances: 1
+        cpu: 1
+        static_ip: 0
+        dynamic_ip: 1
+        properties:
+          cf:
+            api_url: https://api.(( ..cf.cloud_controller.system_domain.value ))
+            admin_username: (( ..cf.uaa.system_services_credentials.identity ))
+            admin_password: (( ..cf.uaa.system_services_credentials.password ))
+            skip_ssl_validation: true
+          broker:
+            name: seaweedfs
+
+      # Smoke tests errand (runs after deploy)
+      - name: smoke-tests
+        templates:
+          - name: smoke-tests
+            release: seaweedfs
+        lifecycle: errand
+        post_deploy: true
+        memory: 1024
+        ephemeral_disk: 4096
+        instances: 1
+        cpu: 1
+        static_ip: 0
+        dynamic_ip: 1
+        properties:
+          cf:
+            api_url: https://api.(( ..cf.cloud_controller.system_domain.value ))
+            admin_username: (( ..cf.uaa.system_services_credentials.identity ))
+            admin_password: (( ..cf.uaa.system_services_credentials.password ))
+            skip_ssl_validation: true
+          smoke_tests:
+            service_name: seaweedfs
+            plan_name: shared
+            timeout_minutes: 10
+            cleanup: true
+            app_domain: (( ..cf.cloud_controller.apps_domain.value ))
+
+  - name: bpm
+    type: bosh-release
+    path: resources/bpm-release.tgz
+
+  - name: routing
+    type: bosh-release
+    path: resources/routing-release.tgz
+
+forms:
+  - name: shared_cluster_config
+    label: Shared Cluster Configuration
+    description: |
+      Configure the shared SeaweedFS cluster that provides the 'shared' service plan.
+      The shared plan allows multiple applications to share a single SeaweedFS cluster,
+      with each application receiving an isolated S3 bucket.
+    properties:
+      - name: shared_cluster_enabled
+        type: boolean
+        label: Enable Shared Cluster Plan
+        description: |
+          Enable the shared cluster plan which provides S3 buckets on a multi-tenant
+          SeaweedFS cluster. Disable to only offer on-demand dedicated plans.
+        default: true
+      - name: s3_route_name
+        type: string
+        label: S3 Endpoint Hostname
+        description: |
+          Hostname prefix for the S3 API endpoint (combined with system domain).
+          Example: 'seaweedfs-s3' creates seaweedfs-s3.sys.example.com
+        default: seaweedfs-s3
+      - name: broker_route_name
+        type: string
+        label: Broker Endpoint Hostname
+        description: |
+          Hostname prefix for the service broker endpoint (combined with system domain).
+          Used by Cloud Foundry to register and communicate with the service broker.
+        default: seaweedfs-broker
+      - name: master_console_enabled
+        type: boolean
+        label: Enable Master Console Route
+        description: |
+          Enable external access to the Master web console via gorouter.
+        default: false
+      - name: master_console_route_name
+        type: string
+        label: Master Console Hostname
+        description: |
+          Hostname prefix for the Master web console (combined with system domain).
+          Example: 'seaweedfs-master' creates seaweedfs-master.sys.example.com
+        default: seaweedfs-master
+      - name: filer_console_enabled
+        type: boolean
+        label: Enable Filer Console Route
+        description: |
+          Enable external access to the Filer web console via gorouter.
+        default: false
+      - name: filer_console_route_name
+        type: string
+        label: Filer Console Hostname
+        description: |
+          Hostname prefix for the Filer web console (combined with system domain).
+          Example: 'seaweedfs-filer' creates seaweedfs-filer.sys.example.com
+        default: seaweedfs-filer
+      - name: shared_replication
+        type: dropdown_select
+        label: Replication Strategy
+        description: Data replication strategy for fault tolerance
+        default: "001"
+        options:
+          - name: "000"
+            label: "No Replication (Development only)"
+          - name: "001"
+            label: "Same Rack - 1 replica (Standard)"
+          - name: "010"
+            label: "Different Rack - 1 replica (High Availability)"
+          - name: "100"
+            label: "Different Data Center - 1 replica (Disaster Recovery)"
+      - name: shared_max_volumes
+        type: integer
+        label: Max Volumes per Server
+        description: Maximum number of volumes each volume server can hold (affects total storage capacity)
+        default: 100
+        constraints:
+          min: 10
+          max: 1000
+      - name: generated_broker_credentials
+        type: simple_credentials
+        label: Service Broker Credentials (Auto-generated)
+        configurable: false
+      - name: generated_s3_credentials
+        type: simple_credentials
+        label: S3 Admin Credentials (Auto-generated)
+        configurable: false
+      - name: tile_icon_base64
+        type: text
+        label: Tile Icon (Base64)
+        configurable: false
+        default: "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"
+
+  - name: service_endpoints
+    label: Service Endpoints
+    description: |
+      This section shows the configured service endpoint hostnames.
+      Full URLs are constructed as: https://<hostname>.<system_domain>
+      The system domain is inherited from your TAS/Cloud Foundry deployment.
+    properties:
+      - name: s3_endpoint_info
+        type: text
+        label: S3 Endpoint URL Pattern
+        description: |
+          The S3 endpoint is accessible at: https://<S3 Hostname>.<system_domain>
+          Configure the S3 hostname on the Shared Cluster Configuration tab.
+        configurable: false
+        default: "See 'S3 Endpoint Hostname' on Shared Cluster Configuration tab"
+      - name: broker_endpoint_info
+        type: text
+        label: Service Broker URL Pattern
+        description: |
+          The Service Broker is accessible at: https://<Broker Hostname>.<system_domain>
+          Configure the broker hostname on the Shared Cluster Configuration tab.
+        configurable: false
+        default: "See 'Broker Endpoint Hostname' on Shared Cluster Configuration tab"
+      - name: master_console_info
+        type: text
+        label: Master Console URL Pattern
+        description: |
+          The Master Console (if enabled) is accessible at: https://<Master Console Hostname>.<system_domain>
+          Enable and configure on the Shared Cluster Configuration tab.
+        configurable: false
+        default: "See 'Master Console Hostname' on Shared Cluster Configuration tab"
+      - name: filer_console_info
+        type: text
+        label: Filer Console URL Pattern
+        description: |
+          The Filer Console (if enabled) is accessible at: https://<Filer Console Hostname>.<system_domain>
+          Enable and configure on the Shared Cluster Configuration tab.
+        configurable: false
+        default: "See 'Filer Console Hostname' on Shared Cluster Configuration tab"
+
