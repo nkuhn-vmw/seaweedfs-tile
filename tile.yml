@@ -3,7 +3,7 @@ name: seaweedfs
 icon_file: resources/icon.png
 label: SeaweedFS Object Storage
 metadata_version: 3.0
-version: "1.0.119"
+version: "1.0.120"
 description: |
   SeaweedFS is a distributed storage system for blobs, objects, files, and data lake.
   This tile provides S3-compatible object storage with both shared and dedicated cluster options.
@@ -121,6 +121,12 @@ packages:
         templates:
           - name: seaweedfs-volume
             release: seaweedfs
+          - name: route_registrar
+            release: routing
+            consumes:
+              nats-tls:
+                from: nats-tls
+                deployment: (( ..cf.deployment_name ))
           - name: bpm
             release: bpm
         memory: 2048
@@ -132,6 +138,19 @@ packages:
         dynamic_ip: 1
         max_in_flight: 1
         properties:
+          nats:
+            tls:
+              enabled: true
+              client_cert: (( ..cf.properties.nats_client_cert.cert_pem ))
+              client_key: (( ..cf.properties.nats_client_cert.private_key_pem ))
+              ca_cert: (( ..cf.properties.nats_tls_external_cert.cert_pem ))
+          route_registrar:
+            routes:
+              - name: seaweedfs-volume
+                port: 8080
+                registration_interval: 20s
+                uris:
+                  - (( .properties.volume_console_route_name.value )).(( ..cf.cloud_controller.system_domain.value ))
           seaweedfs:
             volume:
               max_volumes: (( .properties.shared_max_volumes.value ))
@@ -457,6 +476,19 @@ forms:
           Hostname prefix for the Filer web console (combined with system domain).
           Example: 'seaweedfs-filer' creates seaweedfs-filer.sys.example.com
         default: seaweedfs-filer
+      - name: volume_console_enabled
+        type: boolean
+        label: Enable Volume Console Route
+        description: |
+          Enable external access to the Volume server web console via gorouter.
+        default: false
+      - name: volume_console_route_name
+        type: string
+        label: Volume Console Hostname
+        description: |
+          Hostname prefix for the Volume server web console (combined with system domain).
+          Example: 'seaweedfs-volume' creates seaweedfs-volume.sys.example.com
+        default: seaweedfs-volume
       - name: shared_replication
         type: dropdown_select
         label: Replication Strategy
@@ -551,4 +583,12 @@ forms:
           Enable and configure on the Shared Cluster Configuration tab.
         configurable: false
         default: "See 'Filer Console Hostname' on Shared Cluster Configuration tab"
+      - name: volume_console_info
+        type: text
+        label: Volume Console URL Pattern
+        description: |
+          The Volume Console (if enabled) is accessible at: https://<Volume Console Hostname>.<system_domain>
+          Enable and configure on the Shared Cluster Configuration tab.
+        configurable: false
+        default: "See 'Volume Console Hostname' on Shared Cluster Configuration tab"
 
