@@ -3,7 +3,7 @@ name: seaweedfs
 icon_file: resources/icon.png
 label: SeaweedFS Object Storage
 metadata_version: 3.0
-version: "1.0.120"
+version: "1.0.121"
 description: |
   SeaweedFS is a distributed storage system for blobs, objects, files, and data lake.
   This tile provides S3-compatible object storage with both shared and dedicated cluster options.
@@ -544,51 +544,4 @@ forms:
         default: ""
         optional: true
 
-  - name: service_endpoints
-    label: Service Endpoints
-    description: |
-      This section shows the configured service endpoint hostnames.
-      Full URLs are constructed as: https://<hostname>.<system_domain>
-      The system domain is inherited from your TAS/Cloud Foundry deployment.
-    properties:
-      - name: s3_endpoint_info
-        type: text
-        label: S3 Endpoint URL Pattern
-        description: |
-          The S3 endpoint is accessible at: https://<S3 Hostname>.<system_domain>
-          Configure the S3 hostname on the Shared Cluster Configuration tab.
-        configurable: false
-        default: "See 'S3 Endpoint Hostname' on Shared Cluster Configuration tab"
-      - name: broker_endpoint_info
-        type: text
-        label: Service Broker URL Pattern
-        description: |
-          The Service Broker is accessible at: https://<Broker Hostname>.<system_domain>
-          Configure the broker hostname on the Shared Cluster Configuration tab.
-        configurable: false
-        default: "See 'Broker Endpoint Hostname' on Shared Cluster Configuration tab"
-      - name: master_console_info
-        type: text
-        label: Master Console URL Pattern
-        description: |
-          The Master Console (if enabled) is accessible at: https://<Master Console Hostname>.<system_domain>
-          Enable and configure on the Shared Cluster Configuration tab.
-        configurable: false
-        default: "See 'Master Console Hostname' on Shared Cluster Configuration tab"
-      - name: filer_console_info
-        type: text
-        label: Filer Console URL Pattern
-        description: |
-          The Filer Console (if enabled) is accessible at: https://<Filer Console Hostname>.<system_domain>
-          Enable and configure on the Shared Cluster Configuration tab.
-        configurable: false
-        default: "See 'Filer Console Hostname' on Shared Cluster Configuration tab"
-      - name: volume_console_info
-        type: text
-        label: Volume Console URL Pattern
-        description: |
-          The Volume Console (if enabled) is accessible at: https://<Volume Console Hostname>.<system_domain>
-          Enable and configure on the Shared Cluster Configuration tab.
-        configurable: false
-        default: "See 'Volume Console Hostname' on Shared Cluster Configuration tab"
 
