@@ -3,7 +3,7 @@ name: seaweedfs
 icon_file: resources/icon.png
 label: SeaweedFS Object Storage
 metadata_version: 3.0
-version: "1.0.121"
+version: "1.0.123"
 description: |
   SeaweedFS is a distributed storage system for blobs, objects, files, and data lake.
   This tile provides S3-compatible object storage with both shared and dedicated cluster options.
@@ -243,6 +243,49 @@ packages:
                       - "Admin"
                       - "Read"
                       - "Write"
+
+      # Admin Console (password-protected management dashboard)
+      - name: seaweedfs-admin
+        templates:
+          - name: seaweedfs-admin
+            release: seaweedfs
+            consumes:
+              seaweedfs-master:
+                from: seaweedfs-master
+          - name: route_registrar
+            release: routing
+            consumes:
+              nats-tls:
+                from: nats-tls
+                deployment: (( ..cf.deployment_name ))
+          - name: bpm
+            release: bpm
+        memory: 512
+        ephemeral_disk: 2048
+        instances: 1
+        cpu: 1
+        static_ip: 0
+        dynamic_ip: 1
+        max_in_flight: 1
+        properties:
+          nats:
+            tls:
+              enabled: true
+              client_cert: (( ..cf.properties.nats_client_cert.cert_pem ))
+              client_key: (( ..cf.properties.nats_client_cert.private_key_pem ))
+              ca_cert: (( ..cf.properties.nats_tls_external_cert.cert_pem ))
+          route_registrar:
+            routes:
+              - name: seaweedfs-admin
+                port: 23646
+                registration_interval: 20s
+                uris:
+                  - (( .properties.admin_console_route_name.value )).(( ..cf.cloud_controller.system_domain.value ))
+          seaweedfs:
+            admin:
+              port: 23646
+              username: (( .properties.generated_admin_credentials.identity ))
+              password: (( .properties.generated_admin_credentials.password ))
 
       # Service Broker
       - name: seaweedfs-broker
@@ -489,6 +532,15 @@ forms:
           Hostname prefix for the Volume server web console (combined with system domain).
           Example: 'seaweedfs-volume' creates seaweedfs-volume.sys.example.com
         default: seaweedfs-volume
+      - name: admin_console_route_name
+        type: string
+        label: Admin Console Hostname
+        description: |
+          Hostname prefix for the Admin console (combined with system domain).
+          The admin console provides a password-protected management dashboard
+          for the SeaweedFS cluster.
+          Example: 'seaweedfs-admin' creates seaweedfs-admin.sys.example.com
+        default: seaweedfs-admin
       - name: shared_replication
         type: dropdown_select
         label: Replication Strategy
@@ -518,6 +570,10 @@ forms:
       - name: generated_s3_credentials
         type: simple_credentials
         label: S3 Admin Credentials (Auto-generated)
+        configurable: false
+      - name: generated_admin_credentials
+        type: simple_credentials
+        label: Admin Console Credentials (Auto-generated)
         configurable: false
   - name: smoke_test_config
     label: Smoke Test Configuration
