@@ -3,7 +3,7 @@ name: seaweedfs
 icon_file: resources/icon.png
 label: SeaweedFS Object Storage
 metadata_version: 3.0
-version: "1.0.123"
+version: "1.0.124"
 description: |
   SeaweedFS is a distributed storage system for blobs, objects, files, and data lake.
   This tile provides S3-compatible object storage with both shared and dedicated cluster options.
@@ -71,6 +71,39 @@ service_plan_forms:
         constraints:
           min: 10
           max: 10000
+      - name: enable_master_console_route
+        type: boolean
+        label: Enable Master Console Route
+        description: |
+          Enable external access to the Master web console via gorouter.
+          Only use if not using the admin console. Keep in mind these URLs have no auth.
+        default: false
+        configurable: true
+      - name: enable_filer_console_route
+        type: boolean
+        label: Enable Filer Console Route
+        description: |
+          Enable external access to the Filer web console via gorouter.
+          Only use if not using the admin console. Keep in mind these URLs have no auth.
+        default: false
+        configurable: true
+      - name: enable_volume_console_route
+        type: boolean
+        label: Enable Volume Console Route
+        description: |
+          Enable external access to the Volume server web console via gorouter.
+          Only use if not using the admin console. Keep in mind these URLs have no auth.
+        default: false
+        configurable: true
+      - name: enable_admin_console_route
+        type: boolean
+        label: Enable Admin Console Route
+        description: |
+          Enable external access to the Admin console via gorouter.
+          The admin console provides a password-protected management dashboard
+          for the SeaweedFS cluster with access to master, filer, volume, and S3 management.
+        default: false
+        configurable: true
 
 packages:
   - name: seaweedfs
@@ -79,6 +112,7 @@ packages:
     jobs:
       # Shared cluster components
       - name: seaweedfs-master
+        label: Shared Cluster - Master
         templates:
           - name: seaweedfs-master
             release: seaweedfs
@@ -118,6 +152,7 @@ packages:
               default_replication: (( .properties.shared_replication.value ))
 
       - name: seaweedfs-volume
+        label: Shared Cluster - Volume
         templates:
           - name: seaweedfs-volume
             release: seaweedfs
@@ -156,6 +191,7 @@ packages:
               max_volumes: (( .properties.shared_max_volumes.value ))
 
       - name: seaweedfs-filer
+        label: Shared Cluster - Filer
         templates:
           - name: seaweedfs-filer
             release: seaweedfs
@@ -194,6 +230,7 @@ packages:
 
       # S3 Gateway for external access (via gorouter for TLS termination)
       - name: seaweedfs-s3
+        label: Shared Cluster - S3 Gateway
         templates:
           - name: seaweedfs-s3
             release: seaweedfs
@@ -246,6 +283,7 @@ packages:
 
       # Admin Console (password-protected management dashboard)
       - name: seaweedfs-admin
+        label: Shared Cluster - Admin Console
         templates:
           - name: seaweedfs-admin
             release: seaweedfs
@@ -289,6 +327,7 @@ packages:
 
       # Service Broker
       - name: seaweedfs-broker
+        label: Shared Cluster - Broker
         templates:
           - name: seaweedfs-broker
             release: seaweedfs
@@ -336,6 +375,8 @@ packages:
                 icon_url: ""
               shared_cluster:
                 enabled: (( .properties.shared_cluster_enabled.value ))
+                plan_name: (( .properties.shared_plan_name.value ))
+                plan_description: (( .properties.shared_plan_description.value ))
                 # S3 endpoint uses gorouter route (TLS handled by gorouter)
                 s3_endpoint: (( .properties.s3_route_name.value )).(( ..cf.cloud_controller.system_domain.value ))
                 use_ssl: true
@@ -371,6 +412,7 @@ packages:
 
       # Register broker errand (post-deploy)
       - name: register-broker
+        label: Errand - Register Broker
         templates:
           - name: register-broker
             release: seaweedfs
@@ -398,6 +440,7 @@ packages:
 
       # Deregister broker errand (pre-delete)
       - name: deregister-broker
+        label: Errand - Deregister Broker
         templates:
           - name: deregister-broker
             release: seaweedfs
@@ -420,6 +463,7 @@ packages:
 
       # Smoke tests errand (runs after deploy)
       - name: smoke-tests
+        label: Errand - Smoke Tests
         templates:
           - name: smoke-tests
             release: seaweedfs
@@ -471,6 +515,18 @@ forms:
           Enable the shared cluster plan which provides S3 buckets on a multi-tenant
           SeaweedFS cluster. Disable to only offer on-demand dedicated plans.
         default: true
+      - name: shared_plan_name
+        type: string
+        label: Shared Plan Name
+        description: |
+          Name of the shared plan as shown to developers in the marketplace.
+        default: shared
+      - name: shared_plan_description
+        type: string
+        label: Shared Plan Description
+        description: |
+          Description of the shared plan shown to developers in the marketplace.
+        default: "Shared SeaweedFS cluster with dedicated bucket"
       - name: on_demand_azs
         type: string
         label: On-Demand Availability Zones
@@ -498,6 +554,7 @@ forms:
         label: Enable Master Console Route
         description: |
           Enable external access to the Master web console via gorouter.
+          Only use if not using the admin console. Keep in mind these URLs have no auth.
         default: false
       - name: master_console_route_name
         type: string
@@ -511,6 +568,7 @@ forms:
         label: Enable Filer Console Route
         description: |
           Enable external access to the Filer web console via gorouter.
+          Only use if not using the admin console. Keep in mind these URLs have no auth.
         default: false
       - name: filer_console_route_name
         type: string
@@ -524,6 +582,7 @@ forms:
         label: Enable Volume Console Route
         description: |
           Enable external access to the Volume server web console via gorouter.
+          Only use if not using the admin console. Keep in mind these URLs have no auth.
         default: false
       - name: volume_console_route_name
         type: string
@@ -532,6 +591,14 @@ forms:
           Hostname prefix for the Volume server web console (combined with system domain).
           Example: 'seaweedfs-volume' creates seaweedfs-volume.sys.example.com
         default: seaweedfs-volume
+      - name: admin_console_enabled
+        type: boolean
+        label: Enable Admin Console Route
+        description: |
+          Enable external access to the Admin console via gorouter.
+          The admin console provides a password-protected management dashboard
+          for the SeaweedFS cluster with access to master, filer, volume, and S3 management.
+        default: false
       - name: admin_console_route_name
         type: string
         label: Admin Console Hostname
@@ -569,11 +636,11 @@ forms:
         configurable: false
       - name: generated_s3_credentials
         type: simple_credentials
-        label: S3 Admin Credentials (Auto-generated)
+        label: Shared Cluster S3 Credentials
         configurable: false
       - name: generated_admin_credentials
         type: simple_credentials
-        label: Admin Console Credentials (Auto-generated)
+        label: Shared Cluster Admin Console Credentials
         configurable: false
   - name: smoke_test_config
     label: Smoke Test Configuration
